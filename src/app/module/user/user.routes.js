@@ -1,15 +1,13 @@
 import express from "express";
 import auth from "../../middleware/auth.js";
-import config from "../../../config.js";
+import config from "../../../config/index.js";
 import UserController from "./user.controller.js";
 
 const router = express.Router();
 
 router
-  .post("/", auth(config.auth_level.user), UserController.postUser)
-  .get("/:id", auth(config.auth_level.user), UserController.getUser)
-  .get("/", auth(config.auth_level.user), UserController.getAllUsers)
-  .patch("/:id", auth(config.auth_level.user), UserController.updateUser)
-  .delete("/:id", auth(config.auth_level.user), UserController.deleteUser);
+  .post("/become-driver", auth(config.auth_level.user), UserController.becomeDriver)
+  .get("/user-profile", auth(config.auth_level.user), UserController.getUserProfile)
+
 
 export default router;

@@ -1,5 +1,6 @@
 import bcrypt from "bcrypt";
 import cron from "node-cron";
+import mongoose from "mongoose";
 import { status } from "http-status";
 import ApiError from "../../../error/ApiError.js";
 import config from "../../../config/index.js";
@@ -396,16 +397,30 @@ const hashPass = async (newPassword) => {
     return await bcrypt.hash(newPassword, Number(config.bcrypt_salt_rounds));
 };
 
-// Unset activationCode activationCodeExpire field for expired activation code
-// Unset isVerified, verificationCode, verificationCodeExpire field for expired verification code
-cron.schedule("* * * * *", async () => {
-    try {
-        updateFieldsWithCron("activation");
-        updateFieldsWithCron("verification");
-    } catch (error) {
-        logger.error("Error removing expired code:", error);
-    }
-});
+let authMaintenanceStarted = false;
+
+const startAuthMaintenance = () => {
+    if (authMaintenanceStarted) return;
+
+    authMaintenanceStarted = true;
+
+    // Run cleanup only when MongoDB is fully connected.
+    cron.schedule("* * * * *", async () => {
+        if (mongoose.connection.readyState !== 1) {
+            logger.warn("Skipping auth cleanup cron because MongoDB is not connected");
+            return;
+        }
+
+        try {
+            await Promise.all([
+                updateFieldsWithCron("activation"),
+                updateFieldsWithCron("verification"),
+            ]);
+        } catch (error) {
+            logger.error(`Error removing expired auth codes: ${error.message}`);
+        }
+    });
+};
 
 const AuthService = {
     registrationAccount,
@@ -419,3 +434,4 @@ const AuthService = {
 };
 
 export default AuthService;
+export { startAuthMaintenance };

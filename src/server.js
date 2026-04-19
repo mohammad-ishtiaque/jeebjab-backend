@@ -1,11 +1,13 @@
 import app from "./app.js";
 import config from "./config/index.js";
 import connectDB from "./connection/connectDB.js";
+import { startAuthMaintenance } from "./app/module/auth/auth.service.js";
 import { logger, errorLogger } from "./util/logger.js";
 
 async function main() {
   try {
     await connectDB();
+    startAuthMaintenance();
 
     const server = app.listen(config.port, config.base_url, () => {
       console.log(`🚀 Server is humming at http://${config.base_url}:${config.port}`);

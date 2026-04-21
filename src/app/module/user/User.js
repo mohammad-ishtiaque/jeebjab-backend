@@ -26,6 +26,10 @@ const driverProfileSchema = new Schema(
             type: String,       // badge / employee ID issued by the company
             default: null,
         },
+        companyName: {
+            type: String, 
+            default: ""
+        },
 
         // ── Vehicle info (filled during profile completion) ──────
         vehicleType: {
@@ -124,10 +128,10 @@ const driverProfileSchema = new Schema(
             type: {
                 type: String,
                 enum: ["Point"],
-                // Removed default: "Point" so it doesn't create half-complete objects
             },
             coordinates: {
                 type: [Number],     // [longitude, latitude]
+                default: undefined, // prevent empty-array init that breaks 2dsphere index
             },
         },
         lastLocationUpdatedAt: {

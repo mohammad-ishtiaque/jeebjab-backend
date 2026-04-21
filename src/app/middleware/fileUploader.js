@@ -1,7 +1,6 @@
 import multer from "multer";
 import fs from "fs"
 
-// ১. টাইপ এক্সটেনশন: ইমেজ এবং ভিডিও উভয়ই অ্যালাউ করা হলো
 const allowedMimeTypes = [
   "image/jpeg", "image/png", "image/jpg", "image/webp",
   "video/mp4", "video/mpeg", "video/x-matroska", "video/webm"
@@ -16,7 +15,6 @@ const createDirIfNotExists = (uploadPath) => {
 const uploadFile = () => {
   const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-      // ডাইনামিক পাথ: profile_image, post_image বা chat_media ফোল্ডার তৈরি হবে
       const uploadPath = `uploads/${file.fieldname}`;
       createDirIfNotExists(uploadPath);
 
@@ -27,10 +25,8 @@ const uploadFile = () => {
       }
     },
     filename: function (req, file, cb) {
-      // স্পেস রিমুভ করে ক্লিন ফাইলনেম তৈরি`
       const name = Date.now() + "-" + file.originalname.replace(/\s/g, "_");
 
-      // তোমার অরিজিনাল লজিক: এরর হলে ফাইল ডিলিট করার সুবিধার্থে পাথ সেভ রাখা
       if (!req.uploadedFiles) req.uploadedFiles = [];
       const filePath = `uploads/${file.fieldname}/${name}`;
       req.uploadedFiles.push(filePath);
@@ -39,10 +35,20 @@ const uploadFile = () => {
     },
   });
 
-  const fileFilter = (req, file, cb) => {
-    // ২. ফিল্ডনেম এক্সটেনশন: 'chat_media' যোগ করা হলো
-    const allowedFieldNames = ["profile_image", "post_image", "chat_media"];
+  const allowedFieldNames = [
+    "profile_image",
+    "post_image",
+    "chat_media",
+    // driver document fields — field name IS the docType
+    "driving_license",
+    "vehicle_registration",
+    "insurance",
+    "id_proof",
+    "company_id",
+    "other",
+  ];
 
+  const fileFilter = (req, file, cb) => {
     if (!file.fieldname) return cb(null, true);
 
     if (!allowedFieldNames.includes(file.fieldname))
@@ -56,12 +62,19 @@ const uploadFile = () => {
     storage: storage,
     fileFilter: fileFilter,
     limits: {
-      fileSize: 100 * 1024 * 1024, // ৩. লিমিট ১০০ এমবি (ভিডিওর জন্য বড় সাইজ দরকার)
+      fileSize: 100 * 1024 * 1024,
     },
   }).fields([
     { name: "profile_image", maxCount: 1 },
     { name: "post_image", maxCount: 5 },
-    { name: "chat_media", maxCount: 10 }, // চ্যাটে একসাথে ১০টি ফাইল পাঠানো যাবে
+    { name: "chat_media", maxCount: 10 },
+    // each driver doc type is its own field — no separate docTypes array needed
+    { name: "driving_license", maxCount: 1 },
+    { name: "vehicle_registration", maxCount: 1 },
+    { name: "insurance", maxCount: 1 },
+    { name: "id_proof", maxCount: 1 },
+    { name: "company_id", maxCount: 1 },
+    { name: "other", maxCount: 3 },
   ]);
 
   return upload;

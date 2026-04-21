@@ -3,7 +3,7 @@ import sendResponse from "../../../util/sendResponse.js";
 import catchAsync from "../../../util/catchAsync.js";
 
 const becomeDriver = catchAsync(async (req, res) => {
-  const result = await UserService.becomeDriver(req.user, req.body);
+  const result = await UserService.becomeDriver(req.user, req.body, req.files);
   sendResponse(res, {
     statusCode: 201,
     success: true,

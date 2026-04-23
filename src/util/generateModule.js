@@ -25,7 +25,7 @@ const generateModule = (moduleName) => {
   const lowerName = formattedName.toLowerCase();
 
   // Bug Fix: একটাই variable, lowercase folder
-  const dirPath = path.join(__dirname, "src", "app", "module", lowerName);
+  const dirPath = path.join(__dirname, "..", "app", "module", lowerName);
 
   // const dirPath = path.join(__dirname, lowerName);
 

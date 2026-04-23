@@ -5,6 +5,7 @@ import  AuthRoutes  from "../module/auth/auth.routes.js";
 // import { AdminRoutes } from "../module/admin/admin.routes.js";
 // import { SuperAdminRoutes } from "../module/superAdmin/superAdmin.routes.js";
 import  UserRoutes  from "../module/user/user.routes.js";
+import PostRoutes from "../module/post/post.routes.js";
 // import { CurriculumRoutes } from "../module/curriculum/curriculum.routes.js";
 // import { StudentRoutes } from "../module/student/student.routes.js";
 // import { TeacherRoutes } from "../module/teacher/teacher.routes.js";
@@ -22,6 +23,7 @@ const router = express.Router();
 const moduleRoutes = [
   { path: "/auth", route: AuthRoutes },
   { path: "/user", route: UserRoutes },
+  { path: "/post", route: PostRoutes },
   // { path: "/student", route: StudentRoutes },
   // { path: "/admin", route: AdminRoutes },
   // { path: "/super-admin", route: SuperAdminRoutes },

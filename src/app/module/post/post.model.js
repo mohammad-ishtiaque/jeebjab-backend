@@ -37,6 +37,15 @@ const locationSchema = new Schema(
   { _id: false }
 );
 
+// GeoJSON shadow field — mirrors address.coordinates in MongoDB-native format for geospatial queries
+const geoPointSchema = new Schema(
+  {
+    type: { type: String, enum: ["Point"], default: "Point" },
+    coordinates: { type: [Number], required: true }, // [lng, lat] — MongoDB expects longitude first
+  },
+  { _id: false }
+);
+
 const dateTimeSlotSchema = new Schema(
   {
     slotType: {
@@ -99,6 +108,9 @@ const postSchema = new Schema(
       ref: "User",
       default: null,
     },
+    // GeoJSON mirrors of pickup/dropoff coordinates — required for $near / $geoWithin queries
+    pickupGeo: { type: geoPointSchema, default: null },
+    dropoffGeo: { type: geoPointSchema, default: null },
   },
   { timestamps: true }
 );
@@ -106,6 +118,7 @@ const postSchema = new Schema(
 postSchema.index({ user: 1, status: 1 });
 postSchema.index({ status: 1, type: 1 });
 postSchema.index({ createdAt: -1 });
+postSchema.index({ pickupGeo: "2dsphere" });
 
 const Post = model("Post", postSchema);
 

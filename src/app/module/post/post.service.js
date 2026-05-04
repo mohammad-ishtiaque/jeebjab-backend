@@ -155,6 +155,14 @@ const createPost = async (userData, rawBody, files) => {
     campaignCode: campaignCode?.trim() || null,
     acknowledged: true,
     status: "pending",
+    pickupGeo: {
+      type: "Point",
+      coordinates: [pickup.address.coordinates.lng, pickup.address.coordinates.lat],
+    },
+    dropoffGeo: {
+      type: "Point",
+      coordinates: [dropoff.address.coordinates.lng, dropoff.address.coordinates.lat],
+    },
   });
 
   return post;
@@ -216,23 +224,88 @@ const getPostById = async (userData, postId) => {
   return post;
 };
 
-// ─── Get All Posts (Jobs feed for drivers) ────────────────────────────────────
+// ─── Get All Posts (Jobs feed — drivers + users browsing) ────────────────────
+//
+// Query params (all optional):
+//   sort            "newest" (default) | "nearest"  — nearest requires lat+lng
+//   lat, lng        Driver's current GPS coordinates (float) — enables geo features
+//   maxDistance     km radius from lat/lng (1–120, maps to the filter slider)
+//   type            Comma-separated ad types: "move,recycling,buy_for_me,give_away"
+//   size            "small" | "medium" | "large" | "extra_large"
+//   slotType        "regular" | "priority"
+//   pickupPlacement "inside" | "outside"
+//   pickupNoMeet    "true" — only posts where driver doesn't need to meet owner at pickup
+//   pickupCanHelp   "true" — only posts where owner can help carry at pickup
+//   dropoffPlacement "inside" | "outside"
+//   dropoffNoMeet   "true" — only posts where driver doesn't need to meet anyone at dropoff
+//   dropoffCanHelp  "true" — only posts where someone can help carry at dropoff
+//   search          Free-text search in title + description
+//   page, limit     Pagination
 
 const getAllPosts = async (userData, query) => {
-  const { type, size, search, page = 1, limit = 10 } = query;
+  const {
+    sort = "newest",
+    lat,
+    lng,
+    maxDistance,
+    type,
+    size,
+    slotType,
+    pickupPlacement,
+    pickupNoMeet,
+    pickupCanHelp,
+    dropoffPlacement,
+    dropoffNoMeet,
+    dropoffCanHelp,
+    search,
+    page = 1,
+    limit = 10,
+  } = query;
 
-  if (type && !VALID_TYPES.includes(type))
+  // ── Validate enum params ──
+  const types = type
+    ? type.split(",").map((t) => t.trim()).filter(Boolean)
+    : [];
+  if (types.some((t) => !VALID_TYPES.includes(t)))
     throw new ApiError(httpStatus.BAD_REQUEST, `type must be one of: ${VALID_TYPES.join(", ")}`);
   if (size && !VALID_SIZES.includes(size))
     throw new ApiError(httpStatus.BAD_REQUEST, `size must be one of: ${VALID_SIZES.join(", ")}`);
+  if (slotType && !["regular", "priority"].includes(slotType))
+    throw new ApiError(httpStatus.BAD_REQUEST, "slotType must be 'regular' or 'priority'");
+  if (pickupPlacement && !VALID_PLACEMENTS.includes(pickupPlacement))
+    throw new ApiError(httpStatus.BAD_REQUEST, "pickupPlacement must be 'inside' or 'outside'");
+  if (dropoffPlacement && !VALID_PLACEMENTS.includes(dropoffPlacement))
+    throw new ApiError(httpStatus.BAD_REQUEST, "dropoffPlacement must be 'inside' or 'outside'");
 
   const parsedPage = Math.max(1, parseInt(page, 10));
   const parsedLimit = Math.min(50, Math.max(1, parseInt(limit, 10)));
   const skip = (parsedPage - 1) * parsedLimit;
 
+  const parsedLat = lat != null ? parseFloat(lat) : null;
+  const parsedLng = lng != null ? parseFloat(lng) : null;
+  const parsedMaxDist = maxDistance
+    ? Math.min(120, Math.max(1, parseFloat(maxDistance)))
+    : null;
+  const hasLocation = parsedLat !== null && parsedLng !== null && !isNaN(parsedLat) && !isNaN(parsedLng);
+
+  // ── Build filter ──
   const filter = { status: "pending" };
-  if (type) filter.type = type;
+
+  // Ad type — supports single value or comma-separated multi-select
+  if (types.length === 1) filter.type = types[0];
+  else if (types.length > 1) filter.type = { $in: types };
+
   if (size) filter.size = size;
+  if (slotType) filter["dateTimeSlot.slotType"] = slotType;
+
+  if (pickupPlacement) filter["pickup.placement.placement"] = pickupPlacement;
+  if (pickupNoMeet === "true") filter["pickup.placement.needToMeet"] = false;
+  if (pickupCanHelp === "true") filter["pickup.placement.canHelpCarry"] = true;
+
+  if (dropoffPlacement) filter["dropoff.placement.placement"] = dropoffPlacement;
+  if (dropoffNoMeet === "true") filter["dropoff.placement.needToMeet"] = false;
+  if (dropoffCanHelp === "true") filter["dropoff.placement.canHelpCarry"] = true;
+
   if (search?.trim()) {
     filter.$or = [
       { title: { $regex: search.trim(), $options: "i" } },
@@ -240,17 +313,49 @@ const getAllPosts = async (userData, query) => {
     ];
   }
 
-  const [posts, total] = await Promise.all([
-    Post.find(filter)
-      // Hide sensitive details from the feed
-      .select("-pickup.placement.doorCode -pickup.placement.otherInfo -dropoff.placement.doorCode -dropoff.placement.otherInfo")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parsedLimit)
-      .populate("user", "name avatar")
-      .lean(),
-    Post.countDocuments(filter),
-  ]);
+  // ── Geospatial ──
+  // $near: sorts results by distance from driver's location (closest first).
+  //   MongoDB handles the sort — do NOT add an additional .sort() or it overrides it.
+  //   Accepts optional $maxDistance in metres.
+  // $geoWithin $centerSphere: radius filter without forcing distance sort.
+  //   Used when driver sets a maxDistance slider but keeps "newest" sort.
+  let useNearSort = false;
+  if (hasLocation) {
+    if (sort === "nearest") {
+      const geoNear = {
+        $geometry: { type: "Point", coordinates: [parsedLng, parsedLat] },
+      };
+      if (parsedMaxDist) geoNear.$maxDistance = parsedMaxDist * 1000; // km → metres
+      filter.pickupGeo = { $near: geoNear };
+      useNearSort = true;
+    } else if (parsedMaxDist) {
+      // Radius filter only — sort remains "newest"
+      // $centerSphere radius must be in radians: km / Earth's radius (6378.1 km)
+      filter.pickupGeo = {
+        $geoWithin: {
+          $centerSphere: [[parsedLng, parsedLat], parsedMaxDist / 6378.1],
+        },
+      };
+    }
+  }
+
+  // Hide door codes + GeoJSON shadow fields from API response
+  const hiddenFields =
+    "-pickup.placement.doorCode -pickup.placement.otherInfo " +
+    "-dropoff.placement.doorCode -dropoff.placement.otherInfo " +
+    "-pickupGeo -dropoffGeo";
+
+  let q = Post.find(filter)
+    .select(hiddenFields)
+    .populate("user", "name avatar")
+    .lean();
+
+  // Only apply createdAt sort when NOT using $near (which sorts by distance implicitly)
+  if (!useNearSort) q = q.sort({ createdAt: -1 });
+
+  q = q.skip(skip).limit(parsedLimit);
+
+  const [posts, total] = await Promise.all([q, Post.countDocuments(filter)]);
 
   return {
     meta: {
@@ -322,6 +427,12 @@ const updatePost = async (userData, postId, rawBody, files) => {
     if (payload.pickup.address) validateAddress(payload.pickup.address, "Pickup");
     if (payload.pickup.placement) validatePlacement(payload.pickup.placement, "Pickup");
     updates.pickup = payload.pickup;
+    if (payload.pickup.address?.coordinates) {
+      updates.pickupGeo = {
+        type: "Point",
+        coordinates: [payload.pickup.address.coordinates.lng, payload.pickup.address.coordinates.lat],
+      };
+    }
   }
 
   // ── Dropoff ──
@@ -329,6 +440,12 @@ const updatePost = async (userData, postId, rawBody, files) => {
     if (payload.dropoff.address) validateAddress(payload.dropoff.address, "Drop-off");
     if (payload.dropoff.placement) validatePlacement(payload.dropoff.placement, "Drop-off");
     updates.dropoff = payload.dropoff;
+    if (payload.dropoff.address?.coordinates) {
+      updates.dropoffGeo = {
+        type: "Point",
+        coordinates: [payload.dropoff.address.coordinates.lng, payload.dropoff.address.coordinates.lat],
+      };
+    }
   }
 
   // ── Date & time slot ──

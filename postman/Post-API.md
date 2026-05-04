@@ -11,7 +11,7 @@ Get your token from `POST /auth/login` first.
 | Method | Route | Description |
 |--------|-------|-------------|
 | POST | `/post` | Create a new post |
-| GET | `/post` | Jobs feed (all pending posts) |
+| GET | `/post` | Jobs feed (all pending posts, with filters) |
 | GET | `/post/my-posts` | My Post tab (your own posts) |
 | GET | `/post/:id` | Single post detail |
 | PATCH | `/post/:id` | Edit a post |
@@ -128,22 +128,80 @@ Get your token from `POST /auth/login` first.
 
 **GET** `/post`
 
-> Returns all `pending` posts. Drivers use this to browse available jobs.  
-> Door codes are hidden from this feed.
+> Returns all `pending` posts. Used by both the general feed and the driver Jobs tab with filters.  
+> Door codes and internal geo fields are always hidden from this feed.  
+> All query params are optional — omitting them returns unfiltered results (newest first).
 
-**Query Params (all optional):**
+### Query Params
 
+#### Sorting & Location
 | Param | Example | Description |
 |-------|---------|-------------|
-| `type` | `move` | Filter by post type |
-| `size` | `large` | Filter by product size |
-| `search` | `bike` | Search in title & description |
-| `page` | `1` | Page number |
-| `limit` | `10` | Results per page (max 50) |
+| `sort` | `nearest` | `newest` (default) or `nearest`. `nearest` requires `lat` + `lng`. |
+| `lat` | `25.1972` | Driver's current latitude. Enables geo sorting and distance filter. |
+| `lng` | `55.2744` | Driver's current longitude. |
+| `maxDistance` | `90` | Radius in km (1–120). Filters posts whose pickup is within this range from `lat/lng`. |
 
-**Example:** `GET /post?type=move&size=medium&page=1&limit=10`
+#### Ad Type (multi-select)
+| Param | Example | Description |
+|-------|---------|-------------|
+| `type` | `move,recycling` | Comma-separated list. Any of: `move`, `recycling`, `buy_for_me`, `give_away`. |
 
-**Success Response `200`:**
+#### Time Slot
+| Param | Example | Description |
+|-------|---------|-------------|
+| `slotType` | `priority` | `regular` or `priority`. Filters by how urgently the user needs the delivery. |
+
+#### Pick-Up Placement
+| Param | Example | Description |
+|-------|---------|-------------|
+| `pickupPlacement` | `inside` | `inside` or `outside`. Where the item is located at pickup. |
+| `pickupNoMeet` | `true` | Pass `true` to only show posts where the owner does NOT need to meet the driver. |
+| `pickupCanHelp` | `true` | Pass `true` to only show posts where the owner CAN help carry at pickup. |
+
+#### Drop-Off Placement
+| Param | Example | Description |
+|-------|---------|-------------|
+| `dropoffPlacement` | `outside` | `inside` or `outside`. Where to leave the item at dropoff. |
+| `dropoffNoMeet` | `true` | Pass `true` to only show posts where no one needs to meet the driver at dropoff. |
+| `dropoffCanHelp` | `true` | Pass `true` to only show posts where someone can help carry at dropoff. |
+
+#### Search & Pagination
+| Param | Example | Description |
+|-------|---------|-------------|
+| `search` | `bike` | Free-text search in title and description. |
+| `size` | `large` | Filter by item size. |
+| `page` | `1` | Page number (default 1). |
+| `limit` | `10` | Results per page (max 50, default 10). |
+
+### Example Requests
+
+**Driver opens filter screen and applies all options shown in the UI:**
+```
+GET /post?sort=nearest&lat=25.1972&lng=55.2744&maxDistance=90&type=move,recycling&slotType=regular&pickupPlacement=inside&dropoffPlacement=inside&page=1&limit=10
+```
+
+**Newest feed, no filters (default):**
+```
+GET /post
+```
+
+**Filter by ad type + time slot only:**
+```
+GET /post?type=give_away,buy_for_me&slotType=priority
+```
+
+**Nearest jobs within 30 km:**
+```
+GET /post?sort=nearest&lat=25.1972&lng=55.2744&maxDistance=30
+```
+
+**Newest jobs within 90 km radius:**
+```
+GET /post?lat=25.1972&lng=55.2744&maxDistance=90
+```
+
+### Success Response `200`
 ```json
 {
   "success": true,
@@ -160,7 +218,15 @@ Get your token from `POST /auth/login` first.
         "photos": ["uploads/post_image/1710000000000-bike.jpg"],
         "price": 120,
         "status": "pending",
-        "dateTimeSlot": { "slotType": "regular" },
+        "dateTimeSlot": { "slotType": "regular", "scheduledDate": null, "scheduledTime": null },
+        "pickup": {
+          "address": { "text": "Dubai Downtown, Burj Khalifa Blvd", "coordinates": { "lat": 25.1972, "lng": 55.2744 } },
+          "placement": { "placement": "inside", "needToMeet": true, "canHelpCarry": true, "floor": "6", "fitsInElevator": true }
+        },
+        "dropoff": {
+          "address": { "text": "Abu Dhabi, Corniche Road", "coordinates": { "lat": 24.4539, "lng": 54.3773 } },
+          "placement": { "placement": "outside", "needToMeet": false, "canHelpCarry": false }
+        },
         "user": { "_id": "...", "name": "Ahmed", "avatar": "" },
         "createdAt": "2024-01-10T09:00:00.000Z"
       }
@@ -168,6 +234,8 @@ Get your token from `POST /auth/login` first.
   }
 }
 ```
+
+> **Note:** `doorCode`, `otherInfo`, `pickupGeo`, and `dropoffGeo` are always excluded from this feed. They are only visible in the single post detail endpoint (`GET /post/:id`) to the post owner or assigned driver.
 
 ---
 
@@ -323,7 +391,7 @@ Get your token from `POST /auth/login` first.
 
 | Status | When |
 |--------|------|
-| `400` | Missing/invalid field in request body |
+| `400` | Missing/invalid field in request body or query param |
 | `401` | No token or invalid token |
 | `403` | Trying to edit/cancel someone else's post |
 | `404` | Post ID does not exist |
